@@ -7,7 +7,7 @@ description: Add Agent Swarm (Teams) support to Telegram. Each subagent gets its
 
 This skill adds Agent Teams (Swarm) support to an existing Telegram channel. Each subagent in a team gets its own bot identity in the Telegram group, so users can visually distinguish which agent is speaking.
 
-**Prerequisite**: Telegram must already be set up via the `/add-telegram` skill. If `src/telegram.ts` does not exist or `TELEGRAM_BOT_TOKEN` is not configured, tell the user to run `/add-telegram` first.
+**Prerequisite**: Telegram must already be set up. If `src/channels/telegram.ts` does not exist or `TELEGRAM_BOT_TOKEN` is not configured, set up Telegram first.
 
 ## How It Works
 
@@ -70,7 +70,7 @@ export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
 
 ### Step 2: Add Bot Pool to Telegram Module
 
-Read `src/telegram.ts` and add the following:
+Read `src/channels/telegram.ts` and add the following:
 
 1. **Update imports** — add `Api` to the Grammy import:
 
@@ -242,7 +242,7 @@ Read `groups/global/CLAUDE.md` and add a Message Formatting section:
 ```markdown
 ## Message Formatting
 
-NEVER use markdown. Only use WhatsApp/Telegram formatting:
+NEVER use markdown. Only use Telegram formatting:
 - *single asterisks* for bold (NEVER **double asterisks**)
 - _underscores_ for italic
 - • bullet points
@@ -256,7 +256,7 @@ No ## headings. No [links](url). No **double stars**.
 In any group CLAUDE.md that has a "WhatsApp Formatting" section (e.g. `groups/main/CLAUDE.md`), rename the heading to reflect multi-channel support:
 
 ```
-## WhatsApp Formatting (and other messaging apps)
+## Telegram Formatting
 ```
 
 #### 5c. Add Agent Teams instructions to Telegram groups
@@ -280,7 +280,7 @@ Each team member MUST be instructed to:
 2. *Also communicate with teammates* via `SendMessage` as normal for coordination.
 3. Keep group messages *short* — 2-4 sentences max per message. Break longer content into multiple `send_message` calls. No walls of text.
 4. Use the `sender` parameter consistently — always the same name so the bot identity stays stable.
-5. NEVER use markdown formatting. Use ONLY WhatsApp/Telegram formatting: single *asterisks* for bold (NOT **double**), _underscores_ for italic, • for bullets, ```backticks``` for code. No ## headings, no [links](url), no **double asterisks**.
+5. NEVER use markdown formatting. Use ONLY Telegram formatting: single *asterisks* for bold (NOT **double**), _underscores_ for italic, • for bullets, ```backticks``` for code. No ## headings, no [links](url), no **double asterisks**.
 
 ### Example team creation prompt
 
@@ -372,7 +372,7 @@ Check the group's `CLAUDE.md` has the Agent Teams instructions. The lead agent r
 To remove Agent Swarm support while keeping basic Telegram:
 
 1. Remove `TELEGRAM_BOT_POOL` from `src/config.ts`
-2. Remove pool code from `src/telegram.ts` (`poolApis`, `senderBotMap`, `initBotPool`, `sendPoolMessage`)
+2. Remove pool code from `src/channels/telegram.ts` (`poolApis`, `senderBotMap`, `initBotPool`, `sendPoolMessage`)
 3. Remove pool routing from IPC handler in `src/index.ts` (revert to plain `sendMessage`)
 4. Remove `initBotPool` call from `main()`
 5. Remove `sender` param from MCP tool in `container/agent-runner/src/ipc-mcp-stdio.ts`

@@ -1,11 +1,11 @@
 ---
 name: setup
-description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate WhatsApp, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
+description: Run initial NanoClaw setup. Use when user wants to install dependencies, configure Telegram, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
 ---
 
 # NanoClaw Setup
 
-Run all commands automatically. Only pause when user action is required (WhatsApp authentication, configuration choices).
+Run all commands automatically. Only pause when user action is required (Telegram bot token, configuration choices).
 
 **UX Note:** When asking the user questions, prefer using the `AskUserQuestion` tool instead of just outputting text. This integrates with Claude's built-in question/answer system for a better experience.
 
@@ -137,135 +137,41 @@ else
 fi
 ```
 
-## 5. WhatsApp Authentication
+## 5. Configure Telegram Bot
 
 **USER ACTION REQUIRED**
 
-The auth script supports two methods: QR code scanning and pairing code (phone number). Ask the user which they prefer.
-
-The auth script writes status to `store/auth-status.txt`:
-- `already_authenticated` — credentials already exist
-- `pairing_code:<CODE>` — pairing code generated, waiting for user to enter it
-- `authenticated` — successfully authenticated
-- `failed:<reason>` — authentication failed
-
-The script automatically handles error 515 (stream error after pairing) by reconnecting — this is normal and expected during pairing code auth.
-
-### Ask the user which method to use
-
-> How would you like to authenticate WhatsApp?
->
-> 1. **QR code in browser** (Recommended) — Opens a page with the QR code to scan
-> 2. **Pairing code** — Enter a numeric code on your phone, no camera needed
-> 3. **QR code in terminal** — Run the auth command yourself in another terminal
-
-### Option A: QR Code in Browser (Recommended)
-
-Clean any stale auth state and start auth in background:
-
-```bash
-rm -rf store/auth store/qr-data.txt store/auth-status.txt
-npm run auth
-```
-
-Run this with `run_in_background: true`.
-
-Poll for QR data (up to 15 seconds):
-
-```bash
-for i in $(seq 1 15); do if [ -f store/qr-data.txt ]; then echo "qr_ready"; exit 0; fi; STATUS=$(cat store/auth-status.txt 2>/dev/null || echo "waiting"); if [ "$STATUS" = "already_authenticated" ]; then echo "$STATUS"; exit 0; fi; sleep 1; done; echo "timeout"
-```
-
-If `already_authenticated`, skip to the next step.
-
-If QR data is ready, generate the QR as SVG and inject it into the HTML template:
-
-```bash
-node -e "
-const QR = require('qrcode');
-const fs = require('fs');
-const qrData = fs.readFileSync('store/qr-data.txt', 'utf8');
-QR.toString(qrData, { type: 'svg' }, (err, svg) => {
-  if (err) process.exit(1);
-  const template = fs.readFileSync('.claude/skills/setup/qr-auth.html', 'utf8');
-  fs.writeFileSync('store/qr-auth.html', template.replace('{{QR_SVG}}', svg));
-  console.log('done');
-});
-"
-```
-
-Then open it:
-
-```bash
-open store/qr-auth.html
-```
-
 Tell the user:
-> A browser window should have opened with the QR code. It expires in about 60 seconds.
+
+> I need you to create a Telegram bot:
 >
-> Scan it with WhatsApp: **Settings → Linked Devices → Link a Device**
+> 1. Open Telegram and search for `@BotFather`
+> 2. Send `/newbot` and follow prompts:
+>    - Bot name: Something friendly (e.g., "Andy Assistant")
+>    - Bot username: Must end with "bot" (e.g., "andy_ai_bot")
+> 3. Copy the bot token (looks like `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`)
 
-Then poll for completion (up to 120 seconds):
+Wait for the user to provide the token. Add it to `.env`:
 
-```bash
-for i in $(seq 1 60); do STATUS=$(cat store/auth-status.txt 2>/dev/null || echo "waiting"); if [ "$STATUS" = "authenticated" ] || [ "$STATUS" = "already_authenticated" ]; then echo "$STATUS"; exit 0; elif echo "$STATUS" | grep -q "^failed:"; then echo "$STATUS"; exit 0; fi; sleep 2; done; echo "timeout"
+```
+TELEGRAM_BOT_TOKEN=<token>
 ```
 
-- If `authenticated`, success — clean up with `rm -f store/qr-auth.html` and continue.
-- If `failed:qr_timeout`, offer to retry (re-run the auth and regenerate the HTML page).
-- If `failed:logged_out`, delete `store/auth/` and retry.
-
-### Option B: Pairing Code
-
-Ask the user for their phone number (with country code, no + or spaces, e.g. `14155551234`).
-
-Clean any stale auth state and start:
+**Important**: After modifying `.env`, sync to the container environment:
 
 ```bash
-rm -rf store/auth store/qr-data.txt store/auth-status.txt
-npx tsx src/whatsapp-auth.ts --pairing-code --phone PHONE_NUMBER
+cp .env data/env/env
 ```
 
-Run this with `run_in_background: true`.
+### Disable Group Privacy (for group chats)
 
-Poll for the pairing code (up to 15 seconds):
+If the user plans to use the bot in group chats, tell them:
 
-```bash
-for i in $(seq 1 15); do STATUS=$(cat store/auth-status.txt 2>/dev/null || echo "waiting"); if echo "$STATUS" | grep -q "^pairing_code:"; then echo "$STATUS"; exit 0; elif [ "$STATUS" = "authenticated" ] || [ "$STATUS" = "already_authenticated" ]; then echo "$STATUS"; exit 0; elif echo "$STATUS" | grep -q "^failed:"; then echo "$STATUS"; exit 0; fi; sleep 1; done; echo "timeout"
-```
-
-Extract the code from the status (e.g. `pairing_code:ABC12DEF` → `ABC12DEF`) and tell the user:
-
-> Your pairing code: **CODE_HERE**
+> **Important for group chats**: By default, Telegram bots in groups only receive messages that @mention the bot or are commands. To let the bot see all messages:
 >
-> 1. Open WhatsApp on your phone
-> 2. Tap **Settings → Linked Devices → Link a Device**
-> 3. Tap **"Link with phone number instead"**
-> 4. Enter the code: **CODE_HERE**
-
-Then poll for completion (up to 120 seconds):
-
-```bash
-for i in $(seq 1 60); do STATUS=$(cat store/auth-status.txt 2>/dev/null || echo "waiting"); if [ "$STATUS" = "authenticated" ] || [ "$STATUS" = "already_authenticated" ]; then echo "$STATUS"; exit 0; elif echo "$STATUS" | grep -q "^failed:"; then echo "$STATUS"; exit 0; fi; sleep 2; done; echo "timeout"
-```
-
-- If `authenticated` or `already_authenticated`, success — continue to next step.
-- If `failed:logged_out`, delete `store/auth/` and retry.
-- If `failed:515` or timeout, the 515 reconnect should handle this automatically. If it persists, the user may need to temporarily stop other WhatsApp-connected apps on the same device.
-
-### Option C: QR Code in Terminal
-
-Tell the user to run the auth command in another terminal window:
-
-> Open another terminal and run:
-> ```
-> cd PROJECT_PATH && npm run auth
-> ```
-> Scan the QR code that appears, then let me know when it says "Successfully authenticated".
-
-Replace `PROJECT_PATH` with the actual project path (use `pwd`).
-
-Wait for the user to confirm authentication succeeded, then continue to the next step.
+> 1. Open `@BotFather` in Telegram
+> 2. Send `/mybots` and select your bot
+> 3. Go to **Bot Settings** > **Group Privacy** > **Turn off**
 
 ## 6. Configure Assistant Name and Main Channel
 
@@ -293,17 +199,16 @@ Store their choice for use in the steps below.
 > - Can write to global memory that all groups can read
 > - Has read-write access to the entire NanoClaw project
 >
-> **Recommendation:** Use your personal "Message Yourself" chat or a solo WhatsApp group as your main channel. This ensures only you have admin control.
+> **Recommendation:** Use a private DM with the bot as your main channel. This ensures only you have admin control.
 >
 > **Question:** Which setup will you use for your main channel?
 >
 > Options:
-> 1. Personal chat (Message Yourself) - Recommended
-> 2. DM with a specific phone number (e.g. your other phone)
-> 3. Solo WhatsApp group (just me)
-> 4. Group with other people (I understand the security implications)
+> 1. Private chat with the bot (DM) - Recommended
+> 2. Telegram group (just me and the bot)
+> 3. Telegram group with other people (I understand the security implications)
 
-If they choose option 4, ask a follow-up:
+If they choose option 3, ask a follow-up:
 
 > You've chosen a group with other people. This means everyone in that group will have admin privileges over NanoClaw.
 >
@@ -318,7 +223,7 @@ If they choose option 4, ask a follow-up:
 
 ### 6c. Register the main channel
 
-First build, then start the app briefly to connect to WhatsApp and sync group metadata. Use the Bash tool's timeout parameter (15000ms) — do NOT use the `timeout` shell command (it's not available on macOS). The app will be killed when the timeout fires, which is expected.
+First build, then start the app briefly to connect to Telegram and discover the chat ID. Use the Bash tool's timeout parameter (15000ms) — do NOT use the `timeout` shell command (it's not available on macOS). The app will be killed when the timeout fires, which is expected.
 
 ```bash
 npm run build
@@ -329,24 +234,19 @@ Then run briefly (set Bash tool timeout to 15000ms):
 npm run dev
 ```
 
-**For personal chat** (they chose option 1):
+Tell the user to send `/chatid` to the bot in their desired main channel (private DM or group). The bot will reply with the chat ID (e.g., `tg:123456789` for DM, `tg:-1001234567890` for groups).
 
-Personal chats are NOT synced to the database on startup — only groups are. The JID for "Message Yourself" is the bot's own number. Use the number from the WhatsApp auth step and construct the JID as `{number}@s.whatsapp.net`.
+**For private chat** (they chose option 1):
 
-**For DM with a specific number** (they chose option 2):
+The user sends `/chatid` in a DM with the bot. The JID is `tg:{chatId}` (positive number).
 
-Ask the user for the phone number (with country code, no + or spaces, e.g. `14155551234`), then construct the JID as `{number}@s.whatsapp.net`.
+**For group** (they chose option 2 or 3):
 
-**For group** (they chose option 3 or 4):
+The user adds the bot to the group and sends `/chatid`. The JID is `tg:{chatId}` (negative number for groups).
 
-Groups are synced on startup via `groupFetchAllParticipating`. Query the database for recent groups:
+If the app was already run and the user has their chat ID, you can also check the database:
 ```bash
-sqlite3 store/messages.db "SELECT jid, name FROM chats WHERE jid LIKE '%@g.us' AND jid != '__group_sync__' ORDER BY last_message_time DESC LIMIT 40"
-```
-
-Show only the **10 most recent** group names to the user and ask them to pick one. If they say their group isn't in the list, show the next batch from the results you already have. If they tell you the group name directly, look it up:
-```bash
-sqlite3 store/messages.db "SELECT jid, name FROM chats WHERE name LIKE '%GROUP_NAME%' AND jid LIKE '%@g.us'"
+sqlite3 store/messages.db "SELECT jid, name FROM chats WHERE jid LIKE 'tg:%' AND jid != '__group_sync__' ORDER BY last_message_time DESC LIMIT 20"
 ```
 
 ### 6d. Write the configuration
@@ -433,7 +333,7 @@ For each directory they provide, ask:
 ### 7b. Configure Non-Main Group Access
 
 Ask the user:
-> Should **non-main groups** (other WhatsApp chats you add later) be restricted to **read-only** access even if read-write is allowed for the directory?
+> Should **non-main groups** (other Telegram chats you add later) be restricted to **read-only** access even if read-write is allowed for the directory?
 >
 > Recommended: **Yes** - this prevents other groups from modifying files even if you grant them access to a directory.
 
@@ -566,7 +466,7 @@ Check the logs:
 tail -f logs/nanoclaw.log
 ```
 
-The user should receive a response in WhatsApp.
+The user should receive a response in Telegram.
 
 ## Troubleshooting
 
@@ -579,22 +479,16 @@ The user should receive a response in WhatsApp.
 - Check container logs: `cat groups/main/logs/container-*.log | tail -50`
 
 **No response to messages**:
-- Verify the trigger pattern matches (e.g., `@AssistantName` at start of message)
+- Verify the trigger pattern matches (e.g., `@AssistantName` at start of message, or @mention the bot in Telegram)
 - Main channel doesn't require a prefix — all messages are processed
-- Personal/solo chats with `requiresTrigger: false` also don't need a prefix
+- Chats with `requiresTrigger: false` also don't need a prefix
 - Check that the chat JID is in the database: `sqlite3 store/messages.db "SELECT * FROM registered_groups"`
 - Check `logs/nanoclaw.log` for errors
 
-**Messages sent but not received by NanoClaw (DMs)**:
-- WhatsApp may use LID (Linked Identity) JIDs for DMs instead of phone numbers
-- Check logs for `Translated LID to phone JID` — if missing, the LID isn't being resolved
-- The `translateJid` method in `src/channels/whatsapp.ts` uses `sock.signalRepository.lidMapping.getPNForLID()` to resolve LIDs
-- Verify the registered JID doesn't have a device suffix (should be `number@s.whatsapp.net`, not `number:0@s.whatsapp.net`)
-
-**WhatsApp disconnected**:
-- The service will show a macOS notification
-- Run `npm run auth` to re-authenticate
-- Restart the service: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+**Bot not seeing messages in groups**:
+- Telegram Group Privacy may be enabled (default). Disable it in BotFather:
+  - `/mybots` > select bot > **Bot Settings** > **Group Privacy** > **Turn off**
+  - Remove and re-add the bot to the group for the change to take effect
 
 **Unload service**:
 ```bash

@@ -1,11 +1,13 @@
 ---
 name: add-voice-transcription
-description: Add voice message transcription to NanoClaw using OpenAI's Whisper API. Automatically transcribes WhatsApp voice notes so the agent can read and respond to them.
+description: Add voice message transcription to NanoClaw using OpenAI's Whisper API. Automatically transcribes voice messages so the agent can read and respond to them. NOTE - implementation needs adaptation for Telegram (currently references WhatsApp/baileys patterns).
 ---
 
 # Add Voice Message Transcription
 
-This skill adds automatic voice message transcription using OpenAI's Whisper API. When users send voice notes in WhatsApp, they'll be transcribed and the agent can read and respond to the content.
+This skill adds automatic voice message transcription using OpenAI's Whisper API. When users send voice messages, they'll be transcribed and the agent can read and respond to the content.
+
+> **Note:** The code samples below reference WhatsApp/baileys patterns from the original implementation. For Telegram, you'll need to use Grammy's file download API instead of `downloadMediaMessage` from baileys. The Telegram channel (`src/channels/telegram.ts`) already stores `[Voice message]` placeholders — this skill would replace those with actual transcriptions.
 
 **UX Note:** When asking the user questions, prefer using the `AskUserQuestion` tool instead of just outputting text. This integrates with Claude's built-in question/answer system for a better experience.
 
