@@ -6,12 +6,13 @@ import {
   TRIGGER_PATTERN,
 } from '../config.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import { AdminCommands, Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  adminCommands?: AdminCommands;
 }
 
 export class TelegramChannel implements Channel {
@@ -46,6 +47,47 @@ export class TelegramChannel implements Channel {
 
     this.bot.command('ping', (ctx) => {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
+    });
+
+    // Admin commands — only for allowed users on registered chats
+    const adminGuard = (ctx: any): string | null => {
+      const userId = ctx.from?.id?.toString() || '';
+      if (TELEGRAM_ALLOWED_USERS.size > 0 && !TELEGRAM_ALLOWED_USERS.has(userId)) return null;
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) { ctx.reply('This chat is not registered.'); return null; }
+      if (!this.opts.adminCommands) { ctx.reply('Admin commands not available.'); return null; }
+      return group.folder;
+    };
+
+    this.bot.command('reset_session', async (ctx) => {
+      const folder = adminGuard(ctx);
+      if (!folder) return;
+      const result = await this.opts.adminCommands!.resetSession(folder);
+      ctx.reply(result);
+    });
+
+    this.bot.command('reset_memory', async (ctx) => {
+      const folder = adminGuard(ctx);
+      if (!folder) return;
+      const result = await this.opts.adminCommands!.resetMemory(folder);
+      ctx.reply(result);
+    });
+
+    this.bot.command('restart', async (ctx) => {
+      const folder = adminGuard(ctx);
+      if (!folder) return;
+      const result = await this.opts.adminCommands!.restartContainer(folder);
+      ctx.reply(result);
+    });
+
+    this.bot.command('rebuild', async (ctx) => {
+      const userId = ctx.from?.id?.toString() || '';
+      if (TELEGRAM_ALLOWED_USERS.size > 0 && !TELEGRAM_ALLOWED_USERS.has(userId)) return;
+      if (!this.opts.adminCommands) { ctx.reply('Admin commands not available.'); return; }
+      ctx.reply('Rebuilding container image...');
+      const result = await this.opts.adminCommands.rebuildContainer();
+      ctx.reply(result);
     });
 
     this.bot.on('message:text', async (ctx) => {

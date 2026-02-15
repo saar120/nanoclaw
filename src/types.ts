@@ -75,6 +75,15 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+// --- Admin commands ---
+
+export interface AdminCommands {
+  resetSession: (groupFolder: string) => Promise<string>;
+  resetMemory: (groupFolder: string) => Promise<string>;
+  restartContainer: (groupFolder: string) => Promise<string>;
+  rebuildContainer: () => Promise<string>;
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {
