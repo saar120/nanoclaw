@@ -208,7 +208,7 @@ export class TelegramChannel implements Channel {
 
     return new Promise<void>((resolve) => {
       this.bot!.start({
-        onStart: (botInfo) => {
+        onStart: async (botInfo) => {
           logger.info(
             { username: botInfo.username, id: botInfo.id },
             'Telegram bot connected',
@@ -217,6 +217,13 @@ export class TelegramChannel implements Channel {
           console.log(
             `  Send /chatid to the bot to get a chat's registration ID\n`,
           );
+          await this.bot!.api.setMyCommands([
+            { command: 'chatid', description: 'Get this chat\'s registration ID' },
+            { command: 'ping', description: 'Check if the bot is online' },
+            { command: 'reset_session', description: 'Clear session, next message starts fresh' },
+            { command: 'restart', description: 'Stop the running agent container' },
+            { command: 'rebuild', description: 'Rebuild the agent container image' },
+          ]);
           resolve();
         },
       });
