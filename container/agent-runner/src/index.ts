@@ -359,6 +359,7 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
+  model?: string,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
@@ -417,6 +418,7 @@ async function runQuery(
     prompt: stream,
     options: {
       cwd: '/workspace/group',
+      model: model,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -514,6 +516,22 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
+  // Read per-group config for model override (hot-reloaded each run)
+  let groupModel: string | undefined;
+  const groupConfigPath = '/workspace/group/config.json';
+  try {
+    if (fs.existsSync(groupConfigPath)) {
+      const raw = fs.readFileSync(groupConfigPath, 'utf-8');
+      const cfg = JSON.parse(raw);
+      if (typeof cfg.model === 'string' && cfg.model.trim()) {
+        groupModel = cfg.model.trim();
+        log(`Using model from config.json: ${groupModel}`);
+      }
+    }
+  } catch (err) {
+    log(`Warning: failed to read config.json, using default model: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
@@ -540,7 +558,7 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, groupModel, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
