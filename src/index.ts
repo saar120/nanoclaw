@@ -1,10 +1,12 @@
-import { execSync } from 'child_process';
+import { exec, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { promisify } from 'util';
 
 import {
   ASSISTANT_NAME,
   DATA_DIR,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -19,6 +21,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -37,7 +40,7 @@ import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { AdminCommands, Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -397,6 +400,91 @@ function recoverPendingMessages(): void {
   }
 }
 
+const execAsync = promisify(exec);
+
+function findJidByFolder(folder: string): string | undefined {
+  return Object.entries(registeredGroups).find(([, g]) => g.folder === folder)?.[0];
+}
+
+function stopContainer(groupFolder: string): string | null {
+  const jid = findJidByFolder(groupFolder);
+  if (!jid) return null;
+
+  const info = queue.getContainerInfo(jid);
+  if (!info) return null;
+
+  try {
+    execSync(`container stop ${info.containerName}`, { stdio: 'pipe', timeout: 15000 });
+  } catch {
+    info.process.kill('SIGKILL');
+  }
+  return info.containerName;
+}
+
+function buildAdminCommands(): AdminCommands {
+  return {
+    resetSession: async (groupFolder) => {
+      const stopped = stopContainer(groupFolder);
+      delete sessions[groupFolder];
+      deleteSession(groupFolder);
+      logger.info({ groupFolder, stopped }, 'Session reset via admin command');
+      return `Session reset for "${groupFolder}".${stopped ? ` Container "${stopped}" stopped.` : ''} Next message starts a fresh session.`;
+    },
+
+    resetMemory: async (groupFolder) => {
+      const stopped = stopContainer(groupFolder);
+
+      // Delete CLAUDE.md
+      const claudeMd = path.join(GROUPS_DIR, groupFolder, 'CLAUDE.md');
+      if (fs.existsSync(claudeMd)) fs.unlinkSync(claudeMd);
+
+      // Delete SDK sessions directory (auto-memory, settings, etc.)
+      const sessionsDir = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
+      if (fs.existsSync(sessionsDir)) fs.rmSync(sessionsDir, { recursive: true });
+
+      // Clear session
+      delete sessions[groupFolder];
+      deleteSession(groupFolder);
+
+      logger.info({ groupFolder, stopped }, 'Memory reset via admin command');
+      return `Memory wiped for "${groupFolder}". CLAUDE.md and SDK sessions cleared.${stopped ? ` Container "${stopped}" stopped.` : ''} Next message starts fresh.`;
+    },
+
+    restartContainer: async (groupFolder) => {
+      const stopped = stopContainer(groupFolder);
+      if (!stopped) return `No active container for "${groupFolder}".`;
+      logger.info({ groupFolder, containerName: stopped }, 'Container restarted via admin command');
+      return `Container "${stopped}" stopped. Will restart on next message.`;
+    },
+
+    rebuildContainer: async () => {
+      // Stop all running containers
+      const active = queue.getActiveContainers();
+      for (const c of active) {
+        try {
+          execSync(`container stop ${c.containerName}`, { stdio: 'pipe', timeout: 15000 });
+        } catch {
+          c.process.kill('SIGKILL');
+        }
+      }
+
+      // Reset build cache and rebuild
+      try {
+        try { await execAsync('container builder stop', { timeout: 15000 }); } catch { /* may not exist */ }
+        try { await execAsync('container builder rm', { timeout: 15000 }); } catch { /* may not exist */ }
+        await execAsync('container builder start', { timeout: 30000 });
+        await execAsync('./container/build.sh', { timeout: 300000, cwd: process.cwd() });
+        logger.info({ stoppedContainers: active.length }, 'Container rebuilt via admin command');
+        return `Container image rebuilt.${active.length > 0 ? ` ${active.length} container(s) stopped.` : ''} New image will be used on next start.`;
+      } catch (err: any) {
+        const msg = err.stderr || err.message || String(err);
+        logger.error({ err: msg }, 'Container rebuild failed');
+        return `Rebuild failed: ${msg.slice(0, 500)}`;
+      }
+    },
+  };
+}
+
 function ensureContainerSystemRunning(): void {
   try {
     execSync('container system status', { stdio: 'pipe' });
@@ -481,6 +569,7 @@ async function main(): Promise<void> {
     onChatMetadata: (chatJid: string, timestamp: string, name?: string) =>
       storeChatMetadata(chatJid, timestamp, name),
     registeredGroups: () => registeredGroups,
+    adminCommands: buildAdminCommands(),
   };
 
   // Create and connect Telegram channel

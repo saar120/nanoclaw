@@ -281,6 +281,28 @@ export class GroupQueue {
     }
   }
 
+  /**
+   * Get info about a group's running container, or null if none.
+   */
+  getContainerInfo(groupJid: string): { containerName: string; process: ChildProcess } | null {
+    const state = this.groups.get(groupJid);
+    if (!state?.active || !state.containerName || !state.process) return null;
+    return { containerName: state.containerName, process: state.process };
+  }
+
+  /**
+   * Get all currently active containers.
+   */
+  getActiveContainers(): Array<{ groupJid: string; containerName: string; process: ChildProcess }> {
+    const result: Array<{ groupJid: string; containerName: string; process: ChildProcess }> = [];
+    for (const [groupJid, state] of this.groups) {
+      if (state.active && state.containerName && state.process) {
+        result.push({ groupJid, containerName: state.containerName, process: state.process });
+      }
+    }
+    return result;
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
