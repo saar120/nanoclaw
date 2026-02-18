@@ -45,13 +45,20 @@ When you learn something important:
 
 ## Telegram Formatting
 
-Do NOT use markdown headings (##) in Telegram messages. Only use:
-- *Bold* (single asterisks) (NEVER **double asterisks**)
-- _Italic_ (underscores)
-- • Bullets (bullet points)
-- ```Code blocks``` (triple backticks)
+Messages are sent with Telegram's legacy Markdown parser. Use ONLY these formats:
 
-Keep messages clean and readable for Telegram.
+- `*bold*` — single asterisks (NEVER `**double**`)
+- `_italic_` — underscores
+- `` `inline code` `` — single backticks
+- ` ```code block``` ` — triple backticks
+- `[link text](https://url)` — inline links
+- `•` — bullet character for lists (not `-` or `*` list syntax)
+
+Do NOT use:
+- Headings (`##`, `###`, etc.)
+- Any other markdown syntax — unrecognised formatting renders as literal characters or breaks the message
+
+Keep messages concise and readable for mobile.
 
 ---
 

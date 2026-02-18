@@ -47,12 +47,19 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## Message Formatting
+## Telegram Formatting
 
-NEVER use markdown. Only use Telegram formatting:
-- *single asterisks* for bold (NEVER **double asterisks**)
-- _underscores_ for italic
-- • bullet points
-- ```triple backticks``` for code
+Messages are sent with Telegram's legacy Markdown parser. Use ONLY these formats:
 
-No ## headings. No [links](url). No **double stars**.
+- `*bold*` — single asterisks (NEVER `**double**`)
+- `_italic_` — underscores
+- `` `inline code` `` — single backticks
+- ` ```code block``` ` — triple backticks
+- `[link text](https://url)` — inline links
+- `•` — bullet character for lists (not `-` or `*` list syntax)
+
+Do NOT use:
+- Headings (`##`, `###`, etc.)
+- Any other markdown syntax — unrecognised formatting renders as literal characters or breaks the message
+
+Keep messages concise and readable for mobile.
