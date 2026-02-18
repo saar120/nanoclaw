@@ -233,15 +233,130 @@ export function trackDelegation<T>(fn: () => Promise<T>): Promise<T> {
 
 1. Add constants to `src/config.ts`
 2. Extend `ContainerConfig` in `src/types.ts`
-3. Add delegation concurrency tracking to `src/container-runner.ts`
-4. Add `delegate` tool to `container/agent-runner/src/ipc-mcp-stdio.ts`
-5. Add `handleDelegation()` and `delegate` case to `src/ipc.ts`
-6. Update `groups/global/CLAUDE.md` and `groups/main/CLAUDE.md`
-7. Build and test: `npm run build && ./container/build.sh`
+3. Add `ajv` dependency for JSON Schema validation: `npm install ajv`
+4. Add delegation concurrency tracking to `src/container-runner.ts`
+5. Add `delegate` tool (with `output_format`) to `container/agent-runner/src/ipc-mcp-stdio.ts`
+6. Add `handleDelegation()` with validation logic and `delegate` case to `src/ipc.ts`
+7. Update `groups/global/CLAUDE.md` and `groups/main/CLAUDE.md`
+8. Build and test: `npm run build && ./container/build.sh`
+
+## Output Validation (Optional)
+
+The caller can optionally pass an `output_format` — a JSON schema that the target agent's output must conform to. This turns delegation from "give me freeform text" into "give me structured data I can programmatically use."
+
+### How It Works
+
+1. Caller passes `output_format` to the `delegate` tool:
+
+```typescript
+delegate({
+  target_group: "gmail-reader",
+  prompt: "Summarize all my emails from today",
+  output_format: {
+    description: "Array of email summaries",
+    schema: {
+      type: "object",
+      properties: {
+        emails: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              from: { type: "string", description: "Sender email address" },
+              subject: { type: "string" },
+              received_at: { type: "string", description: "ISO 8601 timestamp" },
+              summary: { type: "string", description: "1-2 sentence summary" },
+              priority: { type: "string", enum: ["high", "medium", "low"] },
+              requires_response: { type: "boolean" }
+            },
+            required: ["from", "subject", "summary"]
+          }
+        },
+        total_count: { type: "number" }
+      },
+      required: ["emails", "total_count"]
+    }
+  }
+})
+```
+
+2. The `output_format` gets appended to the target agent's prompt as an instruction:
+
+```
+<output_format>
+You MUST respond with valid JSON matching this schema. Output ONLY the JSON, no other text.
+
+{schema}
+</output_format>
+```
+
+3. **Host-side validation** (in `handleDelegation`): When the target agent returns, the host:
+   - Extracts JSON from the response (strips markdown code fences if present)
+   - Validates against the schema using a lightweight JSON Schema validator
+   - If valid: returns the parsed JSON to the caller
+   - If invalid: **retries once** — sends the validation error back to the target agent as a follow-up message (via IPC input piping) asking it to fix its output
+   - If still invalid after retry: returns the raw output with a validation warning, so the caller can still attempt to use it
+
+### Changes Required
+
+**`container/agent-runner/src/ipc-mcp-stdio.ts`** — Extend `delegate` tool schema:
+
+```typescript
+output_format: {
+  type: "object",
+  description: "Optional JSON schema the target agent's output must conform to",
+  properties: {
+    description: { type: "string" },
+    schema: { type: "object" }
+  },
+  required: ["schema"]
+}
+```
+
+**`src/ipc.ts`** — In `handleDelegation()`:
+
+```typescript
+// If output_format provided:
+// 1. Append format instructions to the prompt sent to target agent
+// 2. After receiving result, validate against schema
+// 3. On validation failure, pipe error back to running container for one retry
+// 4. Return { status, result, validated: true/false }
+```
+
+**New dependency**: `ajv` (or similar lightweight JSON Schema validator) in the host process. Alternatively, use Zod to compile from JSON Schema at runtime — but `ajv` is simpler and purpose-built.
+
+### Validation Flow
+
+```
+Caller                    Host                          Target Agent
+──────                    ────                          ────────────
+delegate(prompt,          receives request
+  output_format) ──────>  appends format to prompt
+                          spawns container ───────────> runs query
+                                                        returns output
+                          receives output <────────────
+                          validates against schema
+
+                          IF VALID:
+                          returns { result, validated: true } ──> caller gets structured data
+
+                          IF INVALID:
+                          pipes "Fix your output: {errors}" ──> agent fixes output
+                          receives corrected output <──────────
+                          validates again
+                          returns { result, validated: bool } ──> caller gets data + warning
+```
+
+### Design Decisions
+
+- **Validation is best-effort, not blocking**: If the target agent can't produce valid JSON after one retry, the caller still gets the raw output. This prevents a bad schema from completely breaking delegation.
+- **Schema lives with the caller, not the target**: The calling agent knows what format it needs. Target agents stay generic — they can serve different callers with different format requirements.
+- **No schema registry**: Schemas are passed inline per-call. If a caller always uses the same schema for a target, that's the caller's responsibility to manage (store in its CLAUDE.md or workspace).
 
 ## What This Enables
 
-- Main agent asks gmail-reader to check emails, gets structured response back
-- Main agent asks calendar-agent for schedule, then synthesizes a daily briefing
-- Research agent delegates web-scraping subtask to a browser-specialized agent
+- Main agent asks gmail-reader to check emails, gets structured JSON back with sender, subject, summary, priority
+- Main agent asks calendar-agent for schedule as structured events, then synthesizes a daily briefing by combining both
+- Research agent delegates web-scraping subtask to a browser-specialized agent, gets extracted data as JSON
 - Any agent can fan out work to multiple specialists in parallel (multiple `delegate` calls via Agent Teams/Task tool)
+- Output validation means callers can reliably parse delegation results without guessing at freeform text
