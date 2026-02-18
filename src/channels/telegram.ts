@@ -241,10 +241,10 @@ export class TelegramChannel implements Channel {
 
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
+        await this.bot.api.sendMessage(numericId, text, { parse_mode: 'Markdown' });
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await this.bot.api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH));
+          await this.bot.api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH), { parse_mode: 'Markdown' });
         }
       }
       logger.info({ jid, length: text.length }, 'Telegram message sent');
